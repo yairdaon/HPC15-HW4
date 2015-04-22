@@ -1,3 +1,9 @@
+/* Convolution example; originally written by Lucas Wilcox.
+ * Minor modifications by Georg Stadler.
+ * The function expects a bitmap image (*.ppm) as input, as
+ * well as a number of blurring loops to be performed.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include "timing.h"
@@ -7,6 +13,7 @@
 #define FILTER_WIDTH 7
 #define HALF_FILTER_WIDTH 3
 
+// local size of work group
 #define WGX 16
 #define WGY 16
 
@@ -70,25 +77,25 @@ int main(int argc, char *argv[])
   // };
 
   // 45 degree motion blur
-  // float filter[] =
-  //      {0,      0,      0,      0,      0, 0.0145,      0,
-  //       0,      0,      0,      0, 0.0376, 0.1283, 0.0145,
-  //       0,      0,      0, 0.0376, 0.1283, 0.0376,      0,
-  //       0,      0, 0.0376, 0.1283, 0.0376,      0,      0,
-  //       0, 0.0376, 0.1283, 0.0376,      0,      0,      0,
-  //  0.0145, 0.1283, 0.0376,      0,      0,      0,      0,
-  //       0, 0.0145,      0,      0,      0,      0,      0};
+  float filter[] =
+    {0,      0,      0,      0,      0, 0.0145,      0,
+     0,      0,      0,      0, 0.0376, 0.1283, 0.0145,
+     0,      0,      0, 0.0376, 0.1283, 0.0376,      0,
+     0,      0, 0.0376, 0.1283, 0.0376,      0,      0,
+     0, 0.0376, 0.1283, 0.0376,      0,      0,      0,
+0.0145, 0.1283, 0.0376,      0,      0,      0,      0,
+     0, 0.0145,      0,      0,      0,      0,      0};
 
   // mexican hat kernel
-  float filter[] = {
-    0, 0,-1,-1,-1, 0, 0,
-    0,-1,-3,-3,-3,-1, 0,
-   -1,-3, 0, 7, 0,-3,-1,
-   -1,-3, 7,24, 7,-3,-1,
-   -1,-3, 0, 7, 0,-3,-1,
-    0,-1,-3,-3,-3,-1, 0,
-    0, 0,-1,-1,-1, 0, 0
-  };
+  // float filter[] = {
+  //   0, 0,-1,-1,-1, 0, 0,
+  //   0,-1,-3,-3,-3,-1, 0,
+  //  -1,-3, 0, 7, 0,-3,-1,
+  //  -1,-3, 7,24, 7,-3,-1,
+  //  -1,-3, 0, 7, 0,-3,-1,
+  //   0,-1,-3,-3,-3,-1, 0,
+  //   0, 0,-1,-1,-1, 0, 0
+  // };
 
 
   if(argc != 3)
@@ -171,7 +178,7 @@ int main(int argc, char *argv[])
 #ifdef NON_OPTIMIZED
   int deviceWidth = xsize;
 #else
-  int deviceWidth = ((xsize + 16 - 1)/16)* 16;
+  int deviceWidth = ((xsize + WGX - 1)/WGX)* WGX;
 #endif
   int deviceHeight = ysize;
   size_t deviceDataSize = deviceHeight*deviceWidth*sizeof(float);

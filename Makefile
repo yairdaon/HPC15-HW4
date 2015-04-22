@@ -1,4 +1,5 @@
 EXECUTABLES = convolution
+#CC=gcc49
 
 all: $(EXECUTABLES)
 
