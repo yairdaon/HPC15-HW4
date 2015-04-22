@@ -267,7 +267,10 @@ int main(int argc, char *argv[])
 
   double elapsed = timestamp_diff_in_seconds(tic,toc)/num_loops;
   printf("%f s\n", elapsed);
-  printf("%f GB/s\n", 2*xsize*ysize*sizeof(double)/1e9/elapsed);
+  printf("%f MPixels/s\n", xsize*ysize/1e6/elapsed);
+  printf("%f GBit/s\n", 2*xsize*ysize*sizeof(float)/1e9/elapsed);
+  printf("%f GFlop/s\n", (xsize-HALF_FILTER_WIDTH)*(ysize-HALF_FILTER_WIDTH)
+	 *FILTER_WIDTH*FILTER_WIDTH/1e9/elapsed);
 
   // --------------------------------------------------------------------------
   // transfer back & check
