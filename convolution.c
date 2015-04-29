@@ -88,7 +88,7 @@ int main(int argc, char *argv[])
   // convert image to grayscale
   // --------------------------------------------------------------------------
   for(int n = 0; n < xsize*ysize; ++n)
-    gray[n] = (0.21f*r[n])/rgb_max + (0.72f*g[n])/rgb_max + (0.07f*b[n])/rgb_max;
+    congray_cl[n] = gray[n] = (0.21f*r[n])/rgb_max + (0.72f*g[n])/rgb_max + (0.07f*b[n])/rgb_max;
 
   // --------------------------------------------------------------------------
   // get an OpenCL context and queue
