@@ -8,7 +8,7 @@ LDFLAGS += $(foreach librarydir,$(subst :, ,$(LD_LIBRARY_PATH)),-L$(librarydir))
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
   LDFLAGS += -lrt -lOpenCL -lm
-  CFLAGS += -Wall -std=gnu99 -g -O2
+  CFLAGS +=  -std=gnu99 -g -O2
 endif
 ifeq ($(UNAME_S),Darwin)
   LDFLAGS +=  -framework OpenCL -lm
@@ -29,5 +29,7 @@ ppma_io.o: ppma_io.c ppma_io.h
 
 convolution: convolution.o ppma_io.o cl-helper.o
 
+bike: convolution
+	./convolution bike.ppm 55
 clean:
 	rm -f $(EXECUTABLES) *.o

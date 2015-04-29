@@ -17,46 +17,7 @@
 #define WGX 16
 #define WGY 16
 
-
-void print_kernel_info(cl_command_queue queue, cl_kernel knl)
-{
-  // get device associated with the queue
-  cl_device_id dev;
-  CALL_CL_SAFE(clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE,
-        sizeof(dev), &dev, NULL));
-
-  char kernel_name[4096];
-  CALL_CL_SAFE(clGetKernelInfo(knl, CL_KERNEL_FUNCTION_NAME,
-        sizeof(kernel_name), &kernel_name, NULL));
-  kernel_name[4095] = '\0';
-  printf("Info for kernel %s:\n", kernel_name);
-
-  size_t kernel_work_group_size;
-  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev, CL_KERNEL_WORK_GROUP_SIZE,
-        sizeof(kernel_work_group_size), &kernel_work_group_size, NULL));
-  printf("  CL_KERNEL_WORK_GROUP_SIZE=%zd\n", kernel_work_group_size);
-
-  size_t preferred_work_group_size_multiple;
-  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev,
-        CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE,
-        sizeof(preferred_work_group_size_multiple),
-        &preferred_work_group_size_multiple, NULL));
-  printf("  CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE=%zd\n",
-      preferred_work_group_size_multiple);
-
-  cl_ulong kernel_local_mem_size;
-  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev, CL_KERNEL_LOCAL_MEM_SIZE,
-        sizeof(kernel_local_mem_size), &kernel_local_mem_size, NULL));
-  printf("  CL_KERNEL_LOCAL_MEM_SIZE=%llu\n",
-      (long long unsigned int)kernel_local_mem_size);
-
-  cl_ulong kernel_private_mem_size;
-  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev, CL_KERNEL_PRIVATE_MEM_SIZE,
-        sizeof(kernel_private_mem_size), &kernel_private_mem_size, NULL));
-  printf("  CL_KERNEL_PRIVATE_MEM_SIZE=%llu\n",
-      (long long unsigned int)kernel_private_mem_size);
-}
-
+void print_kernel_info(cl_command_queue queue, cl_kernel knl);
 
 int main(int argc, char *argv[])
 {
@@ -120,8 +81,6 @@ int main(int argc, char *argv[])
   // --------------------------------------------------------------------------
   posix_memalign((void**)&gray, 32, xsize*ysize*sizeof(float));
   if(!gray) { fprintf(stderr, "alloc gray"); abort(); }
-  posix_memalign((void**)&congray, 32, xsize*ysize*sizeof(float));
-  if(!congray) { fprintf(stderr, "alloc gray"); abort(); }
   posix_memalign((void**)&congray_cl, 32, xsize*ysize*sizeof(float));
   if(!congray_cl) { fprintf(stderr, "alloc gray"); abort(); }
 
@@ -130,35 +89,6 @@ int main(int argc, char *argv[])
   // --------------------------------------------------------------------------
   for(int n = 0; n < xsize*ysize; ++n)
     gray[n] = (0.21f*r[n])/rgb_max + (0.72f*g[n])/rgb_max + (0.07f*b[n])/rgb_max;
-
-  // --------------------------------------------------------------------------
-  // execute filter on cpu
-  // --------------------------------------------------------------------------
-  for(int i = HALF_FILTER_WIDTH; i < ysize - HALF_FILTER_WIDTH; ++i)
-  {
-    for(int j = HALF_FILTER_WIDTH; j < xsize - HALF_FILTER_WIDTH; ++j)
-    {
-      float sum = 0;
-      for(int k = -HALF_FILTER_WIDTH; k <= HALF_FILTER_WIDTH; ++k)
-      {
-        for(int l = -HALF_FILTER_WIDTH; l <= HALF_FILTER_WIDTH; ++l)
-        {
-          sum += gray[(i+k)*xsize + (j+l)] *
-            filter[(k+HALF_FILTER_WIDTH)*FILTER_WIDTH + (l+HALF_FILTER_WIDTH)];
-        }
-      }
-      congray[i*xsize + j] = sum;
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // output cpu filtered image
-  // --------------------------------------------------------------------------
-  printf("Writing cpu filtered image\n");
-  for(int n = 0; n < xsize*ysize; ++n)
-    r[n] = g[n] = b[n] = (int)(congray[n] * rgb_max);
-  error = ppma_write("output_cpu.ppm", xsize, ysize, r, g, b);
-  if(error) { fprintf(stderr, "error writing image"); abort(); }
 
   // --------------------------------------------------------------------------
   // get an OpenCL context and queue
@@ -200,27 +130,6 @@ int main(int argc, char *argv[])
   CHECK_CL_ERROR(status, "clCreateBuffer");
 
   // --------------------------------------------------------------------------
-  // transfer to device
-  // --------------------------------------------------------------------------
-#ifdef NON_OPTIMIZED
-  CALL_CL_SAFE(clEnqueueWriteBuffer(
-        queue, buf_gray, /*blocking*/ CL_TRUE, /*offset*/ 0,
-        deviceDataSize, gray, 0, NULL, NULL));
-#else
-  size_t buffer_origin[3] = {0,0,0};
-  size_t host_origin[3] = {0,0,0};
-  size_t region[3] = {deviceWidth*sizeof(float), ysize, 1};
-  clEnqueueWriteBufferRect(queue, buf_gray, CL_TRUE,
-                           buffer_origin, host_origin, region,
-                           deviceWidth*sizeof(float), 0, xsize*sizeof(float), 0,
-                           gray, 0, NULL, NULL);
-#endif
-
-  CALL_CL_SAFE(clEnqueueWriteBuffer(
-        queue, buf_filter, /*blocking*/ CL_TRUE, /*offset*/ 0,
-        FILTER_WIDTH*FILTER_WIDTH*sizeof(float), filter, 0, NULL, NULL));
-
-  // --------------------------------------------------------------------------
   // run code on device
   // --------------------------------------------------------------------------
 
@@ -239,9 +148,9 @@ int main(int argc, char *argv[])
   cl_int localHeight = local_size[1] + paddingPixels;
   size_t localMemSize = localWidth * localHeight * sizeof(float);
 
-  CALL_CL_SAFE(clSetKernelArg(knl, 0, sizeof(buf_gray), &buf_gray));
-  CALL_CL_SAFE(clSetKernelArg(knl, 1, sizeof(buf_congray), &buf_congray));
-  CALL_CL_SAFE(clSetKernelArg(knl, 2, sizeof(buf_filter), &buf_filter));
+  CALL_CL_SAFE(clSetKernelArg(knl, 0, sizeof(buf_gray), &buf_gray)); // input
+  CALL_CL_SAFE(clSetKernelArg(knl, 1, sizeof(buf_congray), &buf_congray)); //output
+  CALL_CL_SAFE(clSetKernelArg(knl, 2, sizeof(buf_filter), &buf_filter)); // filter array
   CALL_CL_SAFE(clSetKernelArg(knl, 3, sizeof(rows), &rows));
   CALL_CL_SAFE(clSetKernelArg(knl, 4, sizeof(cols), &cols));
   CALL_CL_SAFE(clSetKernelArg(knl, 5, sizeof(filterWidth), &filterWidth));
@@ -249,37 +158,61 @@ int main(int argc, char *argv[])
   CALL_CL_SAFE(clSetKernelArg(knl, 7, sizeof(localHeight), &localHeight));
   CALL_CL_SAFE(clSetKernelArg(knl, 8, sizeof(localWidth), &localWidth));
 
+  
   // --------------------------------------------------------------------------
   // print kernel info
   // --------------------------------------------------------------------------
-  print_kernel_info(queue, knl);
+  //print_kernel_info(queue, knl);
 
   CALL_CL_SAFE(clFinish(queue));
   timestamp_type tic, toc;
   get_timestamp(&tic);
+  
+
+
+
+
+
+
+
+
   for(int loop = 0; loop < num_loops; ++loop)
   {
-    CALL_CL_SAFE(clEnqueueNDRangeKernel(queue, knl, 2, NULL,
-          global_size, local_size, 0, NULL, NULL));
-  }
-  CALL_CL_SAFE(clFinish(queue));
-  get_timestamp(&toc);
 
-  double elapsed = timestamp_diff_in_seconds(tic,toc)/num_loops;
-  printf("%f s\n", elapsed);
-  printf("%f MPixels/s\n", xsize*ysize/1e6/elapsed);
-  printf("%f GBit/s\n", 2*xsize*ysize*sizeof(float)/1e9/elapsed);
-  printf("%f GFlop/s\n", (xsize-HALF_FILTER_WIDTH)*(ysize-HALF_FILTER_WIDTH)
-	 *FILTER_WIDTH*FILTER_WIDTH/1e9/elapsed);
-
-  // --------------------------------------------------------------------------
-  // transfer back & check
-  // --------------------------------------------------------------------------
+    // --------------------------------------------------------------------------
+    // transfer to device
+    // --------------------------------------------------------------------------
 #ifdef NON_OPTIMIZED
-  CALL_CL_SAFE(clEnqueueReadBuffer(
-        queue, buf_congray, /*blocking*/ CL_TRUE, /*offset*/ 0,
-        xsize * ysize * sizeof(float), congray_cl,
-        0, NULL, NULL));
+    CALL_CL_SAFE(clEnqueueWriteBuffer( queue, buf_gray, /*blocking*/ CL_TRUE, /*offset*/ 0,
+				       deviceDataSize, gray, 0, NULL, NULL));
+#else
+    size_t buffer_origin[3] = {0,0,0};
+    size_t host_origin[3] = {0,0,0};
+    size_t region[3] = {deviceWidth*sizeof(float), ysize, 1};
+    clEnqueueWriteBufferRect(queue, buf_gray, CL_TRUE,
+			     buffer_origin, host_origin, region,
+			     deviceWidth*sizeof(float), 0, xsize*sizeof(float), 0,
+			     gray, 0, NULL, NULL);
+#endif
+    
+    CALL_CL_SAFE(clEnqueueWriteBuffer( queue, buf_filter, /*blocking*/ CL_TRUE, /*offset*/ 0,
+				       FILTER_WIDTH*FILTER_WIDTH*sizeof(float), filter, 0, NULL, NULL));
+    
+
+    // --------------------------------------------------------------------------
+    // do convolution!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    // --------------------------------------------------------------------------
+    CALL_CL_SAFE(clEnqueueNDRangeKernel(queue, knl, 2, NULL,
+					global_size, local_size, 0, NULL, NULL));
+
+    // --------------------------------------------------------------------------
+    // transfer back & check
+    // --------------------------------------------------------------------------
+#ifdef NON_OPTIMIZED
+    CALL_CL_SAFE(clEnqueueReadBuffer(
+				   queue, buf_congray, /*blocking*/ CL_TRUE, /*offset*/ 0,
+				   xsize * ysize * sizeof(float), congray_cl,
+				   0, NULL, NULL));
 #else
   buffer_origin[0] = 3*sizeof(float);
   buffer_origin[1] = 3;
@@ -288,16 +221,52 @@ int main(int argc, char *argv[])
   host_origin[0] = 3*sizeof(float);
   host_origin[1] = 3;
   host_origin[2] = 0;
-
+  
   region[0] = (xsize-paddingPixels)*sizeof(float);
   region[1] = (ysize-paddingPixels);
   region[2] = 1;
-
+  
   clEnqueueReadBufferRect(queue, buf_congray, CL_TRUE,
-      buffer_origin, host_origin, region,
-      deviceWidth*sizeof(float), 0, xsize*sizeof(float), 0,
-      congray_cl, 0, NULL, NULL);
+			  buffer_origin, host_origin, region,
+			  deviceWidth*sizeof(float), 0, xsize*sizeof(float), 0,
+			  congray_cl, 0, NULL, NULL);
 #endif
+
+  memcpy(gray, congray_cl ,  xsize * ysize * sizeof(float) );
+  }
+  
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  CALL_CL_SAFE(clFinish(queue));
+  get_timestamp(&toc);
+  
+  double elapsed = timestamp_diff_in_seconds(tic,toc)/num_loops;
+  printf("%f s\n", elapsed);
+  printf("%f MPixels/s\n", xsize*ysize/1e6/elapsed);
+  printf("%f GBit/s\n", 2*xsize*ysize*sizeof(float)/1e9/elapsed);
+  printf("%f GFlop/s\n", (xsize-HALF_FILTER_WIDTH)*(ysize-HALF_FILTER_WIDTH)
+	 *FILTER_WIDTH*FILTER_WIDTH/1e9/elapsed);
+  
 
   // --------------------------------------------------------------------------
   // output OpenCL filtered image
@@ -318,9 +287,58 @@ int main(int argc, char *argv[])
   CALL_CL_SAFE(clReleaseCommandQueue(queue));
   CALL_CL_SAFE(clReleaseContext(ctx));
   free(gray);
-  free(congray);
   free(congray_cl);
   free(r);
   free(b);
   free(g);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+void print_kernel_info(cl_command_queue queue, cl_kernel knl)
+{
+  // get device associated with the queue
+  cl_device_id dev;
+  CALL_CL_SAFE(clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE,
+        sizeof(dev), &dev, NULL));
+
+  char kernel_name[4096];
+  CALL_CL_SAFE(clGetKernelInfo(knl, CL_KERNEL_FUNCTION_NAME,
+        sizeof(kernel_name), &kernel_name, NULL));
+  kernel_name[4095] = '\0';
+  printf("Info for kernel %s:\n", kernel_name);
+
+  size_t kernel_work_group_size;
+  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev, CL_KERNEL_WORK_GROUP_SIZE,
+        sizeof(kernel_work_group_size), &kernel_work_group_size, NULL));
+  printf("  CL_KERNEL_WORK_GROUP_SIZE=%zd\n", kernel_work_group_size);
+
+  size_t preferred_work_group_size_multiple;
+  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev,
+        CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE,
+        sizeof(preferred_work_group_size_multiple),
+        &preferred_work_group_size_multiple, NULL));
+  printf("  CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE=%zd\n",
+      preferred_work_group_size_multiple);
+
+  cl_ulong kernel_local_mem_size;
+  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev, CL_KERNEL_LOCAL_MEM_SIZE,
+        sizeof(kernel_local_mem_size), &kernel_local_mem_size, NULL));
+  printf("  CL_KERNEL_LOCAL_MEM_SIZE=%llu\n",
+      (long long unsigned int)kernel_local_mem_size);
+
+  cl_ulong kernel_private_mem_size;
+  CALL_CL_SAFE(clGetKernelWorkGroupInfo(knl, dev, CL_KERNEL_PRIVATE_MEM_SIZE,
+        sizeof(kernel_private_mem_size), &kernel_private_mem_size, NULL));
+  printf("  CL_KERNEL_PRIVATE_MEM_SIZE=%llu\n",
+      (long long unsigned int)kernel_private_mem_size);
 }
